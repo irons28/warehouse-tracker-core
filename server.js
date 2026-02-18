@@ -449,7 +449,11 @@ function rebuildLocationsToAll4Layout(done) {
   const idSet = new Set(baseRows.map((r) => r.id));
 
   db.all('SELECT id, location FROM pallets WHERE status = "active"', (pErr, pallets) => {
-    if (pErr) return done(pErr);
+    if (pErr) {
+      const msg = String(pErr.message || "").toLowerCase();
+      if (!msg.includes("no such table: pallets")) return done(pErr);
+      pallets = [];
+    }
 
     const updates = [];
     const extraRows = [];
@@ -513,8 +517,12 @@ function rebuildLocationsToAll4Layout(done) {
 
             db.all('SELECT location FROM pallets WHERE status = "active" GROUP BY location', (occErr, occRows) => {
               if (occErr) {
-                db.run("ROLLBACK");
-                return done(occErr);
+                const occMsg = String(occErr.message || "").toLowerCase();
+                if (!occMsg.includes("no such table: pallets")) {
+                  db.run("ROLLBACK");
+                  return done(occErr);
+                }
+                occRows = [];
               }
 
               const occupied = new Set((occRows || []).map((r) => normalizeLocationId(r.location)).filter(Boolean));
