@@ -5,9 +5,46 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="$ROOT_DIR/logs"
 SERVER_PID_FILE="$ROOT_DIR/.wt-server.pid"
 TUNNEL_PID_FILE="$ROOT_DIR/.wt-tunnel.pid"
+CLOUDFLARE_CONFIG="${HOME}/.cloudflared/config.yml"
 
 mkdir -p "$LOG_DIR"
 cd "$ROOT_DIR"
+
+drop_pid_if_dead() {
+  local pid_file="$1"
+  if [ ! -f "$pid_file" ]; then
+    return 0
+  fi
+  local pid
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    rm -f "$pid_file"
+  fi
+}
+
+kill_pid_file_process() {
+  local pid_file="$1"
+  if [ ! -f "$pid_file" ]; then
+    return 0
+  fi
+  local pid
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    sleep 1
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  rm -f "$pid_file"
+}
+
+kill_port_listener() {
+  local port="$1"
+  local pids
+  pids="$(lsof -ti tcp:"$port" 2>/dev/null || true)"
+  if [ -n "$pids" ]; then
+    echo "$pids" | xargs kill -9 2>/dev/null || true
+  fi
+}
 
 if [ ! -d "$ROOT_DIR/node_modules" ]; then
   echo "Installing dependencies..."
@@ -25,19 +62,20 @@ if ! command -v cloudflared >/dev/null 2>&1; then
   exit 1
 fi
 
-start_process_if_needed() {
+# Clean stale state/processes so one-click start is reliable.
+drop_pid_if_dead "$SERVER_PID_FILE"
+drop_pid_if_dead "$TUNNEL_PID_FILE"
+kill_pid_file_process "$SERVER_PID_FILE"
+kill_pid_file_process "$TUNNEL_PID_FILE"
+pkill -f "cloudflared tunnel run" 2>/dev/null || true
+pkill -f "node server.js" 2>/dev/null || true
+kill_port_listener 3000
+kill_port_listener 3443
+
+start_process() {
   local pid_file="$1"
   local cmd="$2"
   local log_file="$3"
-
-  if [ -f "$pid_file" ]; then
-    local existing_pid
-    existing_pid="$(cat "$pid_file" 2>/dev/null || true)"
-    if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
-      echo "Already running (PID $existing_pid): $cmd"
-      return 0
-    fi
-  fi
 
   echo "Starting: $cmd"
   nohup bash -lc "$cmd" >"$log_file" 2>&1 &
@@ -52,13 +90,13 @@ start_process_if_needed() {
   fi
 }
 
-start_process_if_needed "$SERVER_PID_FILE" "npm start" "$LOG_DIR/server.log"
+start_process "$SERVER_PID_FILE" "npm start" "$LOG_DIR/server.log"
 
 TUNNEL_CMD="npm run tunnel:cf"
-if [ -f "${HOME}/.cloudflared/config.yml" ]; then
+if [ -f "$CLOUDFLARE_CONFIG" ]; then
   TUNNEL_CMD="npm run tunnel:fixed"
 fi
-start_process_if_needed "$TUNNEL_PID_FILE" "$TUNNEL_CMD" "$LOG_DIR/tunnel.log"
+start_process "$TUNNEL_PID_FILE" "$TUNNEL_CMD" "$LOG_DIR/tunnel.log"
 
 echo ""
 echo "Warehouse Tracker started."
@@ -67,16 +105,26 @@ echo "Server log: $LOG_DIR/server.log"
 echo "Tunnel log: $LOG_DIR/tunnel.log"
 echo ""
 
-# Try to print fixed hostname from cloudflared config, then fallback to quick tunnel URL.
-fixed_host="$(grep -E '^[[:space:]]*-?[[:space:]]*hostname:' "${HOME}/.cloudflared/config.yml" 2>/dev/null | head -n 1 | sed -E 's/.*hostname:[[:space:]]*//')"
+fixed_host=""
+if [ -f "$CLOUDFLARE_CONFIG" ]; then
+  fixed_host="$(grep -E '^[[:space:]]*-?[[:space:]]*hostname:' "$CLOUDFLARE_CONFIG" | head -n 1 | sed -E 's/.*hostname:[[:space:]]*//' | tr -d '"' | tr -d "'" || true)"
+fi
 if [ -n "$fixed_host" ]; then
   echo "Mobile URL (fixed): https://${fixed_host}"
 else
-  tunnel_url="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$LOG_DIR/tunnel.log" | tail -n 1 || true)"
+  tunnel_url=""
+  for _ in $(seq 1 15); do
+    tunnel_url="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$LOG_DIR/tunnel.log" | tail -n 1 || true)"
+    if [ -n "$tunnel_url" ]; then
+      break
+    fi
+    sleep 1
+  done
+
   if [ -n "$tunnel_url" ]; then
     echo "Mobile URL: $tunnel_url"
   else
-    echo "Waiting for tunnel URL..."
-    echo "Run this to check: grep -Eo 'https://[a-zA-Z0-9.-]+\\.trycloudflare\\.com' logs/tunnel.log | tail -n 1"
+    echo "Tunnel started, but URL not detected yet."
+    echo "Check: tail -n 80 $LOG_DIR/tunnel.log"
   fi
 fi
