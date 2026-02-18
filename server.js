@@ -351,6 +351,161 @@ function clearLoginFailures(key) {
   loginAttempts.delete(key);
 }
 
+const ALL4_RACK_LAYOUT = {
+  A: 8,
+  B: 8,
+  C: 8,
+  D: 8,
+  E: 8,
+  F: 11,
+  G: 11,
+  H: 14,
+  I: 14,
+  J: 19,
+};
+
+function normalizeLocationId(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toUpperCase();
+}
+
+function canonicalizeLegacyLocation(value) {
+  const v = normalizeLocationId(value);
+  const m = v.match(/^([A-Z])\s*(\d+)\s*-\s*L\d+$/i);
+  if (m) return `${m[1].toUpperCase()}${Number(m[2])}`;
+  return v;
+}
+
+function parseAisleRackFromId(id) {
+  const m = String(id || "").match(/^([A-Z])(\d+)(?:\s+FLOOR)?$/);
+  if (!m) return { aisle: null, rack: null };
+  return { aisle: m[1], rack: Number(m[2]) || null };
+}
+
+function generateAll4LocationRows() {
+  const rows = [];
+  Object.entries(ALL4_RACK_LAYOUT).forEach(([aisle, maxRack]) => {
+    for (let rack = 1; rack <= Number(maxRack); rack++) {
+      const rackId = `${aisle}${rack}`;
+      const floorId = `${aisle}${rack} FLOOR`;
+      rows.push({ id: rackId, aisle, rack, level: 1, capacity_pallets: 12, floor_area_sqm: null, location_type: "rack" });
+      rows.push({ id: floorId, aisle, rack, level: 99, capacity_pallets: null, floor_area_sqm: null, location_type: "rack_floor" });
+    }
+  });
+
+  rows.push({ id: "FLOOR SPACE", aisle: "FLOOR", rack: null, level: 500, capacity_pallets: null, floor_area_sqm: null, location_type: "floor_space" });
+  return rows;
+}
+
+function rebuildLocationsToAll4Layout(done) {
+  const baseRows = generateAll4LocationRows();
+  const idSet = new Set(baseRows.map((r) => r.id));
+
+  db.all('SELECT id, location FROM pallets WHERE status = "active"', (pErr, pallets) => {
+    if (pErr) return done(pErr);
+
+    const updates = [];
+    const extraRows = [];
+
+    (pallets || []).forEach((p) => {
+      const raw = normalizeLocationId(p.location);
+      const canon = canonicalizeLegacyLocation(raw);
+      const finalLoc = canon || raw;
+      if (finalLoc && finalLoc !== raw) updates.push({ palletId: p.id, to: finalLoc });
+
+      if (finalLoc && !idSet.has(finalLoc)) {
+        idSet.add(finalLoc);
+        const parsed = parseAisleRackFromId(finalLoc);
+        extraRows.push({
+          id: finalLoc,
+          aisle: parsed.aisle,
+          rack: parsed.rack,
+          level: 999,
+          capacity_pallets: parsed.rack ? 12 : null,
+          floor_area_sqm: null,
+          location_type: parsed.rack ? "rack" : "custom",
+        });
+      }
+    });
+
+    const runUpdates = (idx, cb) => {
+      if (idx >= updates.length) return cb();
+      const u = updates[idx];
+      db.run("UPDATE pallets SET location = ? WHERE id = ?", [u.to, u.palletId], (uErr) => {
+        if (uErr) return cb(uErr);
+        runUpdates(idx + 1, cb);
+      });
+    };
+
+    const allRows = [...baseRows, ...extraRows];
+
+    db.serialize(() => {
+      db.run("BEGIN TRANSACTION");
+      runUpdates(0, (updErr) => {
+        if (updErr) {
+          db.run("ROLLBACK");
+          return done(updErr);
+        }
+
+        db.run("DELETE FROM locations", (delErr) => {
+          if (delErr) {
+            db.run("ROLLBACK");
+            return done(delErr);
+          }
+
+          const stmt = db.prepare("INSERT INTO locations (id, aisle, rack, level, is_occupied, capacity_pallets, floor_area_sqm, location_type) VALUES (?, ?, ?, ?, 0, ?, ?, ?)");
+          allRows.forEach((r) => {
+            stmt.run([r.id, r.aisle, r.rack, r.level, r.capacity_pallets, r.floor_area_sqm, r.location_type]);
+          });
+
+          stmt.finalize((insErr) => {
+            if (insErr) {
+              db.run("ROLLBACK");
+              return done(insErr);
+            }
+
+            db.all('SELECT location FROM pallets WHERE status = "active" GROUP BY location', (occErr, occRows) => {
+              if (occErr) {
+                db.run("ROLLBACK");
+                return done(occErr);
+              }
+
+              const occupied = new Set((occRows || []).map((r) => normalizeLocationId(r.location)).filter(Boolean));
+              const rowsArr = Array.from(occupied);
+
+              const markOccupied = (i, markDone) => {
+                if (i >= rowsArr.length) return markDone();
+                db.run("UPDATE locations SET is_occupied = 1 WHERE id = ?", [rowsArr[i]], (mErr) => {
+                  if (mErr) return markDone(mErr);
+                  markOccupied(i + 1, markDone);
+                });
+              };
+
+              markOccupied(0, (markErr) => {
+                if (markErr) {
+                  db.run("ROLLBACK");
+                  return done(markErr);
+                }
+
+                db.run("COMMIT", (cErr) => {
+                  if (cErr) {
+                    db.run("ROLLBACK");
+                    return done(cErr);
+                  }
+                  return done(null, {
+                    total_locations: allRows.length,
+                    normalized_pallet_locations: updates.length,
+                    preserved_custom_locations: extraRows.length,
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+
 function getAuditContext(req, fallbackScannedBy = "Unknown") {
   const body = req.body && typeof req.body === "object" ? req.body : {};
   const scannedBy = String(body.scanned_by || req.headers["x-scanned-by"] || fallbackScannedBy || "Unknown").trim() || "Unknown";
@@ -539,30 +694,6 @@ db.serialize(() => {
       }
     }
   });
-
-  // Pallets table
-  db.run(
-    `CREATE TABLE IF NOT EXISTS pallets (
-      id TEXT PRIMARY KEY,
-      customer_name TEXT NOT NULL,
-      product_id TEXT NOT NULL,
-      pallet_quantity INTEGER DEFAULT 1,
-      product_quantity INTEGER DEFAULT 0,
-      current_units INTEGER DEFAULT 0,
-      location TEXT NOT NULL,
-      parts TEXT,
-      scanned_by TEXT DEFAULT 'Unknown',
-      version INTEGER NOT NULL DEFAULT 0,
-      date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
-      date_removed DATETIME,
-      status TEXT DEFAULT 'active'
-    )`,
-    (err) => {
-      if (err) console.error("Error creating pallets table:", err);
-      else console.log("✓ Pallets table ready");
-    }
-  );
-
   // Locations table
   db.run(
     `CREATE TABLE IF NOT EXISTS locations (
@@ -570,11 +701,24 @@ db.serialize(() => {
       aisle TEXT,
       rack INTEGER,
       level INTEGER,
-      is_occupied INTEGER DEFAULT 0
+      is_occupied INTEGER DEFAULT 0,
+      capacity_pallets INTEGER,
+      floor_area_sqm REAL,
+      location_type TEXT DEFAULT 'rack'
     )`,
     (err) => {
       if (err) console.error("Error creating locations table:", err);
       else console.log("✓ Locations table ready");
+  db.all("PRAGMA table_info(locations)", (err, columns) => {
+    if (err || !columns) return;
+    const hasCapacity = columns.some((col) => col.name === "capacity_pallets");
+    const hasFloorArea = columns.some((col) => col.name === "floor_area_sqm");
+    const hasLocationType = columns.some((col) => col.name === "location_type");
+    if (!hasCapacity) db.run("ALTER TABLE locations ADD COLUMN capacity_pallets INTEGER");
+    if (!hasFloorArea) db.run("ALTER TABLE locations ADD COLUMN floor_area_sqm REAL");
+    if (!hasLocationType) db.run("ALTER TABLE locations ADD COLUMN location_type TEXT DEFAULT 'rack'");
+  });
+
     }
   );
 
@@ -685,30 +829,25 @@ db.serialize(() => {
     );
   });
 
-  // Populate locations if empty
+  // Populate locations if empty (or reseed on boot if enabled)
   db.get("SELECT COUNT(*) as count FROM locations", (err, row) => {
     if (err) {
       console.error("Error checking locations:", err);
       return;
     }
 
-    if (row.count === 0) {
-      const aisles = ["A","B","C","D","E","F","G","H","I","J"];
-      const stmt = db.prepare(
-        "INSERT INTO locations (id, aisle, rack, level) VALUES (?, ?, ?, ?)"
-      );
-
-      aisles.forEach((aisle) => {
-        for (let rack = 1; rack <= 8; rack++) {
-          for (let level = 1; level <= 6; level++) {
-            const locationId = `${aisle}${rack}-L${level}`;
-            stmt.run(locationId, aisle, rack, level);
-          }
+    const shouldReseedOnBoot = Number(process.env.WT_RESEED_LOCATIONS_ON_BOOT || 0) === 1;
+    if (Number(row?.count || 0) === 0 || shouldReseedOnBoot) {
+      rebuildLocationsToAll4Layout((seedErr, summary) => {
+        if (seedErr) {
+          console.error("Error initializing ALL4 locations:", seedErr);
+          return;
         }
-      });
-
-      stmt.finalize(() => {
-        console.log("✓ Initialized 480 rack locations (A-J, 1-8, L1-L6)");
+        console.log(
+          `✓ ALL4 locations ready (${summary?.total_locations || 0} total, ` +
+          `${summary?.normalized_pallet_locations || 0} pallet location updates, ` +
+          `${summary?.preserved_custom_locations || 0} custom preserved)`
+        );
       });
     } else {
       console.log(`✓ Found ${row.count} existing locations`);
@@ -827,6 +966,56 @@ app.get("/api/auth/users", requireAdminRole, (req, res) => {
     (err, rows) => {
       if (err) return res.status(500).json({ error: "DB error" });
       return res.json(rows || []);
+    }
+  );
+});
+
+app.post("/api/admin/locations/reseed-all4", requireAdminRole, (req, res) => {
+  rebuildLocationsToAll4Layout((err, summary) => {
+    if (err) return res.status(500).json({ error: err.message || "Location reseed failed" });
+    return res.json({ ok: true, layout: "ALL4", summary });
+  });
+});
+
+app.post("/api/admin/locations/upsert", requireAdminRole, (req, res) => {
+  const id = normalizeLocationId(req.body?.id);
+  if (!id) return res.status(400).json({ error: "Location id is required" });
+
+  const aisleRaw = req.body?.aisle;
+  const rackRaw = req.body?.rack;
+  const levelRaw = req.body?.level;
+  const capacityRaw = req.body?.capacity_pallets;
+  const floorAreaRaw = req.body?.floor_area_sqm;
+  const typeRaw = String(req.body?.location_type || "custom").trim().toLowerCase() || "custom";
+
+  const aisle = aisleRaw == null || aisleRaw === "" ? null : String(aisleRaw).trim().toUpperCase();
+  const rack = rackRaw == null || rackRaw === "" ? null : Number(rackRaw);
+  const level = levelRaw == null || levelRaw === "" ? null : Number(levelRaw);
+  const capacity = capacityRaw == null || capacityRaw === "" ? null : Number(capacityRaw);
+  const floorArea = floorAreaRaw == null || floorAreaRaw === "" ? null : Number(floorAreaRaw);
+
+  if (rack != null && (!Number.isFinite(rack) || rack <= 0)) return res.status(400).json({ error: "Invalid rack" });
+  if (level != null && (!Number.isFinite(level) || level < 0)) return res.status(400).json({ error: "Invalid level" });
+  if (capacity != null && (!Number.isFinite(capacity) || capacity < 0)) return res.status(400).json({ error: "Invalid capacity_pallets" });
+  if (floorArea != null && (!Number.isFinite(floorArea) || floorArea < 0)) return res.status(400).json({ error: "Invalid floor_area_sqm" });
+
+  db.run(
+    `INSERT INTO locations (id, aisle, rack, level, is_occupied, capacity_pallets, floor_area_sqm, location_type)
+     VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       aisle = excluded.aisle,
+       rack = excluded.rack,
+       level = excluded.level,
+       capacity_pallets = excluded.capacity_pallets,
+       floor_area_sqm = excluded.floor_area_sqm,
+       location_type = excluded.location_type`,
+    [id, aisle, rack, level, capacity, floorArea, typeRaw],
+    (err) => {
+      if (err) return res.status(500).json({ error: err.message || "Unable to upsert location" });
+      db.get("SELECT * FROM locations WHERE id = ?", [id], (selErr, row) => {
+        if (selErr) return res.status(500).json({ error: "DB error" });
+        return res.json({ ok: true, location: row });
+      });
     }
   );
 });

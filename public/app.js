@@ -227,6 +227,9 @@
     },
     invoiceFilterCustomer: "",
     invoiceFilterStatus: "",
+    locationEditId: "",
+    locationEditCapacity: "",
+    locationEditFloorArea: "",
 
     // --------------------------
     // UI: Toasts
@@ -818,7 +821,15 @@
       const totalUnits = pallets.reduce((sum, p) => sum + (Number(p.current_units) || 0), 0);
       const occupied = Number(this.stats?.occupied_locations || 0);
       const totalLocations = Number(this.stats?.total_locations || 0);
-      const utilization = totalLocations > 0 ? ((occupied / totalLocations) * 100).toFixed(1) : "0.0";
+      const locationRows = Array.isArray(this.locations) ? this.locations : [];
+      const totalPalletCapacity = locationRows.reduce((sum, loc) => {
+        const cap = Number(loc?.capacity_pallets);
+        return Number.isFinite(cap) && cap > 0 ? sum + cap : sum;
+      }, 0);
+      const usedPalletCapacity = Math.max(0, totalPalletQty);
+      const utilization = totalPalletCapacity > 0
+        ? ((usedPalletCapacity / totalPalletCapacity) * 100).toFixed(1)
+        : "0.0";
       const customers = new Set(pallets.map((p) => String(p.customer_name || "").trim()).filter(Boolean));
 
       const now = Date.now();
@@ -898,7 +909,7 @@
             <div class="wt-dash-kpi-card">
               <div class="wt-dash-kpi-label">Space Utilization</div>
               <div class="wt-dash-kpi-value">${utilization}%</div>
-              <div class="wt-dash-kpi-sub">${occupied} / ${totalLocations} locations occupied</div>
+              <div class="wt-dash-kpi-sub">${usedPalletCapacity} / ${totalPalletCapacity} pallet slots used${totalLocations > 0 ? ` • ${occupied} locations active` : ""}</div>
             </div>
             <div class="wt-dash-kpi-card">
               <div class="wt-dash-kpi-label">Revenue (30d)</div>
@@ -1207,7 +1218,7 @@
 
     _scanHint() {
       return this.scanMode === "checkin-pallet" ? "Step 1 of 2: Scan the pallet label." :
-        this.scanMode === "checkin-location" ? "Step 2 of 2: Scan the rack location label (e.g. A1-L2)." :
+        this.scanMode === "checkin-location" ? "Step 2 of 2: Scan the location label (e.g. A1 or A1 Floor)." :
         this.scanMode === "move-pallet" ? "Step 1 of 2: Scan the pallet you want to move." :
         this.scanMode === "move-location" ? "Step 2 of 2: Scan destination location label." :
         this.scanMode === "checkout" ? "Scan pallet label to remove from storage." :
@@ -1582,6 +1593,17 @@
       ])).sort();
       const preview = this.invoicePreview;
       const users = Array.isArray(this.authUsers) ? this.authUsers : [];
+      const locationRows = Array.isArray(this.locations)
+        ? [...this.locations].sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")))
+        : [];
+      const currentLocationEditId = this.locationEditId || String(locationRows[0]?.id || "");
+      const currentLocationRow = locationRows.find((r) => String(r.id || "") === currentLocationEditId) || null;
+      const editCapacity = this.locationEditId
+        ? this.locationEditCapacity
+        : (currentLocationRow?.capacity_pallets == null ? "" : String(currentLocationRow.capacity_pallets));
+      const editFloorArea = this.locationEditId
+        ? this.locationEditFloorArea
+        : (currentLocationRow?.floor_area_sqm == null ? "" : String(currentLocationRow.floor_area_sqm));
       return `
         <div class="space-y-5 fade-in">
           <div>
@@ -1702,6 +1724,57 @@
                 oninput="app.setOperatorName(this.value)" />
             </div>
           </div>
+
+          ${
+            isAdmin
+              ? `
+                <div class="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
+                  <div>
+                    <div class="font-bold text-slate-900">Location Capacity & Floor Space</div>
+                    <div class="mt-1 text-sm text-slate-600">Rack locations default to 12 pallets. Floor-space sqm can be added now or later.</div>
+                  </div>
+
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label class="text-sm font-semibold text-slate-700">Location</label>
+                      <select id="loc-edit-id" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+                        onchange="app.selectLocationForEdit(this.value)">
+                        ${locationRows.map((r) => `<option value="${String(r.id || "")}" ${String(r.id || "") === currentLocationEditId ? "selected" : ""}>${String(r.id || "")}${r.location_type ? ` (${r.location_type})` : ""}</option>`).join("")}
+                      </select>
+                    </div>
+                    <div>
+                      <label class="text-sm font-semibold text-slate-700">Type</label>
+                      <input class="mt-1 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm"
+                        value="${String(currentLocationRow?.location_type || "")}" readonly />
+                    </div>
+                    <div>
+                      <label class="text-sm font-semibold text-slate-700">Capacity (pallets)</label>
+                      <input id="loc-edit-capacity" type="number" min="0" step="1" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                        value="${editCapacity}"
+                        oninput="app.setLocationEditField('capacity', this.value)" />
+                    </div>
+                    <div>
+                      <label class="text-sm font-semibold text-slate-700">Floor area (sqm)</label>
+                      <input id="loc-edit-floor-area" type="number" min="0" step="0.01" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                        value="${editFloorArea}"
+                        oninput="app.setLocationEditField('floor_area', this.value)" />
+                    </div>
+                  </div>
+
+                  <div class="flex flex-wrap gap-2">
+                    <button class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                      onclick="app.saveLocationMetadataFromSettings().catch(e=>app.showToast(e.message || 'Location save failed','error'))">
+                      Save location metadata
+                    </button>
+                    <button class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                      onclick="app.selectLocationForEdit(document.getElementById('loc-edit-id')?.value || '')">
+                      Reset from DB
+                    </button>
+                  </div>
+                </div>
+              `
+              : ""
+          }
 
           <div class="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
             <div class="font-bold text-slate-900">Security & Release</div>
@@ -2057,6 +2130,69 @@
       this.render();
     },
 
+    selectLocationForEdit(locationId) {
+      const selectedId = String(locationId || "").trim();
+      const rows = Array.isArray(this.locations) ? this.locations : [];
+      const fallbackId = String(rows[0]?.id || "");
+      const nextId = selectedId || fallbackId;
+      const row = rows.find((r) => String(r.id || "") === nextId) || null;
+
+      this.locationEditId = nextId;
+      this.locationEditCapacity = row?.capacity_pallets == null ? "" : String(row.capacity_pallets);
+      this.locationEditFloorArea = row?.floor_area_sqm == null ? "" : String(row.floor_area_sqm);
+      this.render();
+    },
+
+    setLocationEditField(field, value) {
+      if (field === "capacity") {
+        this.locationEditCapacity = String(value ?? "");
+        return;
+      }
+      if (field === "floor_area") {
+        this.locationEditFloorArea = String(value ?? "");
+      }
+    },
+
+    async saveLocationMetadataFromSettings() {
+      const selectEl = document.getElementById("loc-edit-id");
+      const selectedId = String(selectEl?.value || this.locationEditId || "").trim();
+      if (!selectedId) throw new Error("Select a location first");
+
+      const rows = Array.isArray(this.locations) ? this.locations : [];
+      const current = rows.find((r) => String(r.id || "") === selectedId) || null;
+      const capacityText = String(this.locationEditCapacity ?? "").trim();
+      const floorAreaText = String(this.locationEditFloorArea ?? "").trim();
+
+      if (capacityText !== "" && !/^\d+$/.test(capacityText)) {
+        throw new Error("Capacity must be a whole number or blank");
+      }
+      if (floorAreaText !== "" && !/^\d+(?:\.\d{1,2})?$/.test(floorAreaText)) {
+        throw new Error("Floor area must be a number (up to 2 decimals) or blank");
+      }
+
+      const payload = {
+        id: selectedId,
+        aisle: current?.aisle ?? null,
+        rack: current?.rack ?? null,
+        level: current?.level ?? null,
+        location_type: String(current?.location_type || "custom").trim().toLowerCase() || "custom",
+        capacity_pallets: capacityText === "" ? null : Number(capacityText),
+        floor_area_sqm: floorAreaText === "" ? null : Number(floorAreaText),
+      };
+
+      const res = await apiFetch("/api/admin/locations/upsert", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+
+      await this.loadLocations();
+      this.locationEditId = selectedId;
+      const row = this.locations.find((r) => String(r.id || "") === selectedId) || res?.location || null;
+      this.locationEditCapacity = row?.capacity_pallets == null ? "" : String(row.capacity_pallets);
+      this.locationEditFloorArea = row?.floor_area_sqm == null ? "" : String(row.floor_area_sqm);
+      this.showToast("Location " + selectedId + " saved", "success");
+      this.render();
+    },
     async loadCurrentUser() {
       try {
         const me = await apiFetch(`/api/auth/me?_t=${Date.now()}`);
@@ -2946,7 +3082,7 @@ PART-ABC x 2"></textarea>
           this.showToastDedup("That is a pallet QR. Now scan the location label.", "info", 2500);
           return;
         }
-        const loc = raw.toUpperCase();
+        const loc = String(raw || "").trim().replace(/\s+/g, " ").toUpperCase();
         if (!loc) return;
 
         const pal = this._scannedPallet;
@@ -3051,7 +3187,7 @@ PART-ABC x 2"></textarea>
           this.showToastDedup("That is a pallet QR. Now scan the destination location label.", "info", 2500);
           return;
         }
-        const loc = raw.toUpperCase();
+        const loc = String(raw || "").trim().replace(/\s+/g, " ").toUpperCase();
         const pal = this._scannedPallet;
         if (!pal?.id) {
           this.showToast("Missing pallet step. Scan pallet first.", "error");
@@ -3399,15 +3535,19 @@ PART-ABC x 2"></textarea>
 
         const item = document.createElement("div");
         item.className = "rounded-xl border border-slate-200 bg-white p-3 text-center";
-        item.innerHTML = `
-          <div class="flex justify-center" id="loc-qr-${CSS.escape(id)}"></div>
-          <div class="mt-2 text-sm font-bold text-slate-900">${id}</div>
-        `;
+
+        const holder = document.createElement("div");
+        holder.className = "flex justify-center";
+
+        const label = document.createElement("div");
+        label.className = "mt-2 text-sm font-bold text-slate-900";
+        label.textContent = id;
+
+        item.appendChild(holder);
+        item.appendChild(label);
         grid.appendChild(item);
 
         // render QR
-        const holderId = `loc-qr-${id}`;
-        const holder = item.querySelector(`#loc-qr-${CSS.escape(id)}`);
         if (holder) {
           try {
             new QRCode(holder, { text: id, width: 128, height: 128 });
