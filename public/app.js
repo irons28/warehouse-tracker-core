@@ -830,6 +830,22 @@
       const utilization = totalPalletCapacity > 0
         ? ((usedPalletCapacity / totalPalletCapacity) * 100).toFixed(1)
         : "0.0";
+      const floorSpaceRows = locationRows.filter((loc) => {
+        const t = String(loc?.location_type || "").toLowerCase();
+        return t === "floor_space" || t === "rack_floor";
+      });
+      const floorTotalSqm = floorSpaceRows.reduce((sum, loc) => {
+        const sqm = Number(loc?.floor_area_sqm);
+        return Number.isFinite(sqm) && sqm > 0 ? sum + sqm : sum;
+      }, 0);
+      const floorUsedSqm = floorSpaceRows.reduce((sum, loc) => {
+        if (!Number(loc?.is_occupied)) return sum;
+        const sqm = Number(loc?.floor_area_sqm);
+        return Number.isFinite(sqm) && sqm > 0 ? sum + sqm : sum;
+      }, 0);
+      const floorUtilization = floorTotalSqm > 0
+        ? ((floorUsedSqm / floorTotalSqm) * 100).toFixed(1)
+        : "0.0";
       const customers = new Set(pallets.map((p) => String(p.customer_name || "").trim()).filter(Boolean));
 
       const now = Date.now();
@@ -910,6 +926,11 @@
               <div class="wt-dash-kpi-label">Space Utilization</div>
               <div class="wt-dash-kpi-value">${utilization}%</div>
               <div class="wt-dash-kpi-sub">${usedPalletCapacity} / ${totalPalletCapacity} pallet slots used${totalLocations > 0 ? ` • ${occupied} locations active` : ""}</div>
+            </div>
+            <div class="wt-dash-kpi-card">
+              <div class="wt-dash-kpi-label">Floor Space Utilization</div>
+              <div class="wt-dash-kpi-value">${floorUtilization}%</div>
+              <div class="wt-dash-kpi-sub">${floorUsedSqm.toFixed(2)} / ${floorTotalSqm.toFixed(2)} sqm in use</div>
             </div>
             <div class="wt-dash-kpi-card">
               <div class="wt-dash-kpi-label">Revenue (30d)</div>
