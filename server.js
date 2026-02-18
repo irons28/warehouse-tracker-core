@@ -2096,6 +2096,27 @@ app.get("/api/settings", (req, res) => {
   });
 });
 
+app.post("/api/settings/google-sheets", requireAdminRole, (req, res) => {
+  const urlRaw = String(req.body?.url || "").trim();
+  if (urlRaw && !/^https:\/\//i.test(urlRaw)) {
+    return res.status(400).json({ error: "Google Sheets URL must start with https://" });
+  }
+
+  const settings = readServerSettings();
+  const next = {
+    ...settings,
+    googleSheetsUrl: urlRaw,
+    appsScriptUrl: urlRaw,
+  };
+
+  try {
+    writeServerSettings(next);
+    return res.json({ ok: true, googleSheetsUrl: urlRaw, appsScriptUrl: urlRaw });
+  } catch (e) {
+    return res.status(500).json({ error: e.message || "Unable to save Google Sheets URL" });
+  }
+});
+
 app.post("/api/settings/branding", requireAdminRole, (req, res) => {
   const companyName = String(req.body?.companyName || "").trim() || "Warehouse Tracker";
   const appTagline = String(req.body?.appTagline || "").trim() || "Live inventory • PWA";

@@ -1672,8 +1672,21 @@
 
           <div class="rounded-2xl border border-slate-200 bg-white p-5">
             <div class="font-bold text-slate-900">Google Sheets</div>
-            <div class="mt-2 text-sm text-slate-600">Current Apps Script URL:</div>
-            <div class="mt-2 break-all rounded-xl bg-slate-50 p-3 text-sm font-mono text-slate-800">${url || "Not set"}</div>
+            <div class="mt-2 text-sm text-slate-600">Apps Script URL:</div>
+            ${
+              isAdmin
+                ? `
+                  <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input id="gs-url-input" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm font-mono"
+                      value="${url || ""}" placeholder="https://script.google.com/macros/s/.../exec" />
+                    <button class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+                      onclick="app.saveGoogleSheetsUrl().catch(e=>app.showToast(e.message || 'URL save failed','error'))">
+                      Save URL
+                    </button>
+                  </div>
+                `
+                : `<div class="mt-2 break-all rounded-xl bg-slate-50 p-3 text-sm font-mono text-slate-800">${url || "Not set"}</div>`
+            }
             <div class="mt-4 flex flex-wrap gap-2">
               <button class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                 onclick="app.testGoogleSheetsConnection()">
@@ -2134,6 +2147,21 @@
       this.accentColor = String(res?.accentColor || accentColor);
       this.applyBrandingTheme();
       this.showToast("Branding settings saved", "success");
+      this.render();
+    },
+
+    async saveGoogleSheetsUrl() {
+      const input = document.getElementById("gs-url-input");
+      const url = String(input?.value || "").trim();
+      if (url && !/^https:\/\//i.test(url)) {
+        throw new Error("Google Sheets URL must start with https://");
+      }
+      const res = await apiFetch("/api/settings/google-sheets", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      });
+      this.googleSheetsUrl = String(res?.googleSheetsUrl || "");
+      this.showToast(this.googleSheetsUrl ? "Google Sheets URL saved" : "Google Sheets URL cleared", "success");
       this.render();
     },
 
