@@ -114,7 +114,7 @@ if [ -n "$fixed_host" ]; then
 else
   tunnel_url=""
   for _ in $(seq 1 15); do
-    tunnel_url="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$LOG_DIR/tunnel.log" | tail -n 1 || true)"
+    tunnel_url="$(grep -aEo 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$LOG_DIR/tunnel.log" | tail -n 1 || true)"
     if [ -n "$tunnel_url" ]; then
       break
     fi
