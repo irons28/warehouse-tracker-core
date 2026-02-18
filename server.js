@@ -241,11 +241,58 @@ function loadActivePalletsForSheets() {
   });
 }
 
+
+function loadFloorMetricsForSheets() {
+  return new Promise((resolve, reject) => {
+    db.all(
+      "SELECT l.id, l.floor_area_sqm, l.location_type, GROUP_CONCAT(DISTINCT p.customer_name) AS customers_csv, COUNT(DISTINCT p.customer_name) AS customer_count FROM locations l LEFT JOIN pallets p ON p.location = l.id AND p.status = 'active' WHERE LOWER(COALESCE(l.location_type, '')) IN ('floor_space', 'rack_floor') GROUP BY l.id, l.floor_area_sqm, l.location_type",
+      [],
+      (err, rows) => {
+        if (err) return reject(err);
+        const locationRows = Array.isArray(rows) ? rows : [];
+        const byCustomer = {};
+        let siteFloorTotalSqm = 0;
+        let siteFloorUsedSqm = 0;
+
+        locationRows.forEach((r) => {
+          const sqm = Number(r.floor_area_sqm || 0);
+          if (!Number.isFinite(sqm) || sqm <= 0) return;
+          siteFloorTotalSqm += sqm;
+
+          const customers = String(r.customers_csv || "")
+            .split(",")
+            .map((c) => String(c || "").trim())
+            .filter(Boolean);
+
+          if (!customers.length) return;
+          siteFloorUsedSqm += sqm;
+          const share = sqm / customers.length;
+          customers.forEach((name) => {
+            if (!byCustomer[name]) byCustomer[name] = 0;
+            byCustomer[name] += share;
+          });
+        });
+
+        const roundedByCustomer = Object.fromEntries(
+          Object.entries(byCustomer).map(([k, v]) => [k, Number(v.toFixed(2))])
+        );
+
+        resolve({
+          site_floor_total_sqm: Number(siteFloorTotalSqm.toFixed(2)),
+          site_floor_used_sqm: Number(siteFloorUsedSqm.toFixed(2)),
+          by_customer_sqm_used: roundedByCustomer,
+        });
+      }
+    );
+  });
+}
+
 async function triggerSheetsSyncInternal(trigger = "manual-sync") {
   const settings = readServerSettings();
   const url = String(settings.googleSheetsUrl || settings.appsScriptUrl || "").trim();
   if (!url) throw new Error("Google Sheets URL not configured in server-settings.json");
   const pallets = await loadActivePalletsForSheets();
+  const floorMetrics = await loadFloorMetricsForSheets();
 
   const response = await fetch(url, {
     method: "POST",
@@ -257,6 +304,7 @@ async function triggerSheetsSyncInternal(trigger = "manual-sync") {
         source: "warehouse-tracker",
         synced_at: nowIso(),
         pallets,
+        floor_metrics: floorMetrics,
       },
     }),
   });
@@ -270,7 +318,7 @@ async function triggerSheetsSyncInternal(trigger = "manual-sync") {
   if (body && typeof body === "object" && body.success === false) {
     throw new Error(`Sheets sync rejected: ${body.message || "Unknown Apps Script error"}`);
   }
-  return { ok: true, rows: pallets.length, response: body };
+  return { ok: true, rows: pallets.length, floor_metrics: floorMetrics, response: body };
 }
 
 function startSheetsAutoSync(minutes) {

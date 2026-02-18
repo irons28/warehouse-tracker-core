@@ -232,12 +232,26 @@ function getOrCreateDailyStorageSheet() {
 
   if (!sheet) sheet = ss.insertSheet(DAILY_STORAGE_SHEET_NAME, 2);
 
-  const headers = ["Date", "Customer", "Pallets in Storage"];
+  const headers = ["Date", "Customer", "Pallets in Storage", "Floor Sqm Used", "Site Floor Sqm Total", "Site Floor Sqm Used"];
   ensureHeaders_(sheet, headers, { bg: "#0f9d58", fg: "#ffffff" });
+
+  const headerRange = sheet.getRange(1, 1, 1, headers.length);
+  const existing = headerRange.getValues()[0].map((v) => String(v || "").trim());
+  const mismatch = headers.some((h, i) => existing[i] !== h);
+  if (mismatch) {
+    headerRange.setValues([headers]);
+    headerRange.setFontWeight("bold");
+    headerRange.setBackground("#0f9d58");
+    headerRange.setFontColor("#ffffff");
+    sheet.setFrozenRows(1);
+  }
 
   sheet.setColumnWidth(1, 120);
   sheet.setColumnWidth(2, 180);
   sheet.setColumnWidth(3, 150);
+  sheet.setColumnWidth(4, 140);
+  sheet.setColumnWidth(5, 170);
+  sheet.setColumnWidth(6, 170);
 
   return sheet;
 }
@@ -306,7 +320,7 @@ function normalizePartsList_(parts) {
   return "";
 }
 
-function upsertDailyStorageRow_(dateStr, customer, qty) {
+function upsertDailyStorageRow_(dateStr, customer, qty, floorSqmUsed, siteFloorSqmTotal, siteFloorSqmUsed) {
   const sheet = getOrCreateDailyStorageSheet();
   const tz = Session.getScriptTimeZone();
   const values = sheet.getDataRange().getValues();
@@ -325,11 +339,15 @@ function upsertDailyStorageRow_(dateStr, customer, qty) {
     }
   }
 
+  const floorUsed = Number(floorSqmUsed || 0);
+  const floorTotal = Number(siteFloorSqmTotal || 0);
+  const siteUsed = Number(siteFloorSqmUsed || 0);
+
   if (foundRow > 0) {
-    sheet.getRange(foundRow, 3).setValue(qty);
+    sheet.getRange(foundRow, 3, 1, 4).setValues([[qty, floorUsed, floorTotal, siteUsed]]);
   } else {
     const dateObj = new Date(dateStr + "T00:00:00");
-    sheet.appendRow([dateObj, customer, qty]);
+    sheet.appendRow([dateObj, customer, qty, floorUsed, floorTotal, siteUsed]);
   }
 }
 
@@ -719,11 +737,17 @@ function handleSyncAll(data) {
     }
   });
 
-  // Upsert Daily_Storage rows for this sync date
+  // Upsert Daily_Storage rows for this sync date (with floor-space metrics)
+  const floorMetrics = data.floor_metrics || {};
+  const byCustomerFloorSqm = floorMetrics.by_customer_sqm_used || {};
+  const siteFloorSqmTotal = Number(floorMetrics.site_floor_total_sqm || 0);
+  const siteFloorSqmUsed = Number(floorMetrics.site_floor_used_sqm || 0);
+
   customerNames.forEach((customerName) => {
     const rows = byCustomer[customerName] || [];
     const palletsInStorage = rows.reduce((sum, row) => sum + Number(row[2] || 0), 0);
-    upsertDailyStorageRow_(dateStr, customerName, palletsInStorage);
+    const floorSqmUsed = Number(byCustomerFloorSqm[customerName] || 0);
+    upsertDailyStorageRow_(dateStr, customerName, palletsInStorage, floorSqmUsed, siteFloorSqmTotal, siteFloorSqmUsed);
   });
 
   logActivity(
@@ -753,7 +777,7 @@ function handleDailySnapshot(data) {
   if (!dateStr) {
     return createResponse({ success: false, message: "daily_snapshot missing date" });
   }
-  upsertDailyStorageRow_(dateStr, customer, qty);
+  upsertDailyStorageRow_(dateStr, customer, qty, Number(data.floor_sqm_used || 0), Number(data.site_floor_sqm_total || 0), Number(data.site_floor_sqm_used || 0));
 
   logActivity(
     customer,
