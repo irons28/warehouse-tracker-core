@@ -2,7 +2,7 @@
   "googleSheetsUrl": "",
   "autoSheetsSyncEnabled": 0,
   "autoSheetsSyncMinutes": 15,
-  "authDisabled": 1,
+  "authDisabled": 0,
   "companyName": "Warehouse Tracker",
   "appTagline": "Live inventory • PWA",
   "logoUrl": "",

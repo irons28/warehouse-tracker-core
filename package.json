@@ -20,7 +20,8 @@
     "backup:nightly": "bash ./scripts/nightly-backup.sh",
     "backup:install-cron": "bash ./scripts/install-cron-backup.sh",
     "ops:smoke": "bash ./scripts/ops-smoke-check.sh",
-    "ops:go-live": "npm run preflight:release && npm run ops:smoke"
+    "ops:go-live": "npm run preflight:release && npm run ops:smoke",
+    "auth:reset-admin": "node ./scripts/reset-admin-password.js"
   },
   "engines": {
     "node": ">=18"

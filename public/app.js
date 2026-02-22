@@ -411,12 +411,21 @@
       return parts;
     },
 
+    isAdminUser() {
+      const role = String(this.currentUser?.role || "").toLowerCase();
+      return role === "owner" || role === "admin";
+    },
+
     // --------------------------
     // Navigation / shell
     // --------------------------
     setView(view) {
       if (this.mobileMode && (view === "history" || view === "settings")) {
         view = "scan";
+      }
+      if (view === "settings" && !this.isAdminUser()) {
+        this.showToast("Settings access is restricted to site managers.", "error");
+        view = "dashboard";
       }
       this.view = view;
       this.sidebarOpen = false;
@@ -559,6 +568,7 @@
 
     renderShell(contentHtml) {
       const sidebarOpen = !!this.sidebarOpen;
+      const canAccessSettings = this.isAdminUser();
 
       return `
         <div class="wt-shell ${sidebarOpen ? "sidebar-open" : ""}">
@@ -595,7 +605,7 @@
                 <button class="wt-nav-btn" data-nav="tracker" onclick="app.setView('tracker')">Tracker</button>
                 <button class="wt-nav-btn" data-nav="invoices" onclick="app.setView('invoices')">Invoices</button>
                 <button class="wt-nav-btn" data-nav="history" onclick="app.setView('history')">History</button>
-                <button class="wt-nav-btn" data-nav="settings" onclick="app.setView('settings')">Settings</button>
+                ${canAccessSettings ? `<button class="wt-nav-btn" data-nav="settings" onclick="app.setView('settings')">Settings</button>` : ""}
 
                 <div class="wt-sidebar-sep"></div>
 
@@ -693,6 +703,9 @@
       }
 
       try {
+        if (this.view === "settings" && !this.isAdminUser()) {
+          this.view = "dashboard";
+        }
         const content =
           this.view === "dashboard" ? this.renderDashboard() :
           this.view === "scan" ? this.renderScan() :
