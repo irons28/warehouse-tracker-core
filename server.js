@@ -2448,7 +2448,7 @@ function buildInvoicePreview(input, done) {
   });
 }
 
-app.get("/api/rates", (req, res) => {
+app.get("/api/rates", requireAdminRole, (req, res) => {
   const customer = String(req.query.customer || "").trim();
   const scopedCustomers = getScopedCustomers(req);
   const scoped = applyCustomerScope({ requestedCustomer: customer, scopedCustomers });
@@ -2470,7 +2470,7 @@ app.get("/api/rates", (req, res) => {
   });
 });
 
-app.post("/api/rates", requireWriteRole, (req, res) => {
+app.post("/api/rates", requireAdminRole, (req, res) => {
   const customerName = String(req.body?.customer_name || "").trim();
   const ratePerWeek = Number(req.body?.rate_per_pallet_week);
   const handlingFlat = Number(req.body?.handling_fee_flat || 0);
@@ -2515,7 +2515,7 @@ app.post("/api/rates", requireWriteRole, (req, res) => {
   );
 });
 
-app.get("/api/invoices", (req, res) => {
+app.get("/api/invoices", requireAdminRole, (req, res) => {
   const customer = String(req.query.customer || "").trim();
   const scopedCustomers = getScopedCustomers(req);
   const scoped = applyCustomerScope({ requestedCustomer: customer, scopedCustomers });
@@ -2538,7 +2538,7 @@ app.get("/api/invoices", (req, res) => {
   });
 });
 
-app.get("/api/invoices/aging", (req, res) => {
+app.get("/api/invoices/aging", requireAdminRole, (req, res) => {
   const scopedCustomers = getScopedCustomers(req);
   const sql = Array.isArray(scopedCustomers)
     ? `SELECT * FROM invoices WHERE customer_name IN (${scopedCustomers.map(() => "?").join(",")}) ORDER BY id DESC LIMIT 1000`
@@ -2598,7 +2598,7 @@ app.get("/api/invoices/aging", (req, res) => {
   });
 });
 
-app.post("/api/invoices/preview", (req, res) => {
+app.post("/api/invoices/preview", requireAdminRole, (req, res) => {
   const customerName = String(req.body?.customer_name || "").trim();
   if (customerName && !isCustomerAllowedForUser(req, customerName)) {
     return res.status(403).json({ error: "Customer outside your scope" });
@@ -2609,7 +2609,7 @@ app.post("/api/invoices/preview", (req, res) => {
   });
 });
 
-app.post("/api/invoices/generate", requireWriteRole, (req, res) => {
+app.post("/api/invoices/generate", requireAdminRole, (req, res) => {
   const customerName = String(req.body?.customer_name || "").trim();
   let startDate = String(req.body?.start_date || "").trim();
   let endDate = String(req.body?.end_date || "").trim();
@@ -2684,7 +2684,7 @@ app.post("/api/invoices/generate", requireWriteRole, (req, res) => {
   });
 });
 
-app.post("/api/invoices/:id/status", requireWriteRole, (req, res) => {
+app.post("/api/invoices/:id/status", requireAdminRole, (req, res) => {
   const id = Number(req.params.id);
   const status = String(req.body?.status || "").trim().toUpperCase();
   const allowed = new Set(["DRAFT", "SENT", "PAID"]);
@@ -2736,7 +2736,7 @@ app.post("/api/invoices/:id/status", requireWriteRole, (req, res) => {
   });
 });
 
-app.post("/api/invoices/:id/payments", requireWriteRole, (req, res) => {
+app.post("/api/invoices/:id/payments", requireAdminRole, (req, res) => {
   const id = Number(req.params.id);
   const amount = Number(req.body?.amount);
   const note = String(req.body?.note || "").trim();

@@ -423,8 +423,8 @@
       if (this.mobileMode && (view === "history" || view === "settings")) {
         view = "scan";
       }
-      if (view === "settings" && !this.isAdminUser()) {
-        this.showToast("Settings access is restricted to site managers.", "error");
+      if ((view === "settings" || view === "invoices") && !this.isAdminUser()) {
+        this.showToast("Access is restricted to site managers.", "error");
         view = "dashboard";
       }
       this.view = view;
@@ -603,7 +603,7 @@
                 <button class="wt-nav-btn" data-nav="dashboard" onclick="app.setView('dashboard')">Dashboard</button>
                 <button class="wt-nav-btn" data-nav="scan" onclick="app.setView('scan')">Scan</button>
                 <button class="wt-nav-btn" data-nav="tracker" onclick="app.setView('tracker')">Tracker</button>
-                <button class="wt-nav-btn" data-nav="invoices" onclick="app.setView('invoices')">Invoices</button>
+                ${canAccessSettings ? `<button class="wt-nav-btn" data-nav="invoices" onclick="app.setView('invoices')">Invoices</button>` : ""}
                 <button class="wt-nav-btn" data-nav="history" onclick="app.setView('history')">History</button>
                 ${canAccessSettings ? `<button class="wt-nav-btn" data-nav="settings" onclick="app.setView('settings')">Settings</button>` : ""}
 
@@ -665,7 +665,7 @@
             <button class="wt-mnav-btn" data-nav="dashboard" onclick="app.setView('dashboard')">Home</button>
             <button class="wt-mnav-btn wt-mnav-primary" data-nav="scan" onclick="app.setView('scan')">Scan</button>
             <button class="wt-mnav-btn" data-nav="tracker" onclick="app.setView('tracker')">Tracker</button>
-            <button class="wt-mnav-btn" data-nav="invoices" onclick="app.setView('invoices')">Invoices</button>
+            ${this.isAdminUser() ? `<button class="wt-mnav-btn" data-nav="invoices" onclick="app.setView('invoices')">Invoices</button>` : ""}
             <button class="wt-mnav-btn" onclick="app.setOperatorNameFlow().catch(()=>{})">Name</button>
           </nav>
         </div>
@@ -703,7 +703,7 @@
       }
 
       try {
-        if (this.view === "settings" && !this.isAdminUser()) {
+        if ((this.view === "settings" || this.view === "invoices") && !this.isAdminUser()) {
           this.view = "dashboard";
         }
         const content =
