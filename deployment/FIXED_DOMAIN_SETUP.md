@@ -8,7 +8,7 @@ This runbook configures a stable URL for Warehouse Tracker.
 ## Prerequisites
 - Domain is managed in Cloudflare DNS.
 - `cloudflared` installed on host machine.
-- App runs locally on `http://127.0.0.1:3000`.
+- App runs locally on `https://127.0.0.1:3443` (self-signed cert).
 
 ## 1) Authenticate Cloudflare CLI
 ```bash
@@ -30,7 +30,9 @@ tunnel: <TUNNEL_UUID>
 credentials-file: /Users/<USER>/.cloudflared/<TUNNEL_UUID>.json
 ingress:
   - hostname: <SUBDOMAIN>.<YOUR_DOMAIN>
-    service: http://127.0.0.1:3000
+    service: https://127.0.0.1:3443
+    originRequest:
+      noTLSVerify: true
   - service: http_status:404
 ```
 

@@ -6,5 +6,7 @@ credentials-file: /Users/REPLACE_USER/.cloudflared/REPLACE_TUNNEL_ID.json
 
 ingress:
   - hostname: app.example.com
-    service: http://127.0.0.1:3000
+    service: https://127.0.0.1:3443
+    originRequest:
+      noTLSVerify: true
   - service: http_status:404
