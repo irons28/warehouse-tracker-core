@@ -2921,6 +2921,13 @@
             placeholder="e.g. A1-L3" />
         </div>
 
+        <div>
+          <label class="text-sm font-semibold text-slate-700">Date came in</label>
+          <input data-modal-field="dateCameIn" type="date"
+            class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+            value="${new Date().toISOString().slice(0, 10)}" />
+        </div>
+
         <div class="md:col-span-2">
           <label class="text-sm font-semibold text-slate-700">Parts list (optional)</label>
           <textarea data-modal-field="partsText" rows="5"
@@ -2945,15 +2952,18 @@ PART-ABC x 2"></textarea>
     const palletQuantity = Number(res.fields.palletQty || 1) || 1;
     const productQuantity = Number(res.fields.unitsPerPallet || 0) || 0;
     const location = (res.fields.location || "").trim();
+    const dateCameIn = String(res.fields.dateCameIn || "").trim();
     const partsText = (res.fields.partsText || "").trim();
 
     if (!customerName) return this.showToast("Customer is required", "error");
     if (!productId) return this.showToast("Product ID is required", "error");
     if (!location) return this.showToast("Location is required", "error");
+    if (!dateCameIn) return this.showToast("Date came in is required", "error");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateCameIn)) return this.showToast("Date came in must be YYYY-MM-DD", "error");
 
     const parts = partsText ? this.parsePartsList(partsText) : null;
 
-    await this.checkIn(customerName, productId, palletQuantity, productQuantity, location, parts, "Manual entry");
+    await this.checkIn(customerName, productId, palletQuantity, productQuantity, location, parts, "Manual entry", null, dateCameIn);
   },
 
     // --------------------------
@@ -3333,11 +3343,11 @@ PART-ABC x 2"></textarea>
     };
   },
 
-  async checkIn(customerName, productId, palletQuantity, productQuantity, location, parts = null, scannedBy = 'Manual entry', palletId = null) {
+  async checkIn(customerName, productId, palletQuantity, productQuantity, location, parts = null, scannedBy = 'Manual entry', palletId = null, dateCameIn = null) {
     try {
       const resolvedScannedBy = await this._resolveScannedBy(scannedBy);
       if (!resolvedScannedBy) return this.showToast("Action cancelled (operator not provided)", "info");
-      const idempotencyKey = this._makeIdempotencyKey("CHECK_IN", [palletId || "", customerName, productId, location, palletQuantity, productQuantity]);
+      const idempotencyKey = this._makeIdempotencyKey("CHECK_IN", [palletId || "", customerName, productId, location, palletQuantity, productQuantity, dateCameIn || ""]);
       const payload = {
         id: palletId || null, // server can generate if omitted
         customer_name: customerName,
@@ -3346,6 +3356,7 @@ PART-ABC x 2"></textarea>
         product_quantity: productQuantity,
         location,
         parts,
+        date_added: dateCameIn || null,
         ...this._auditMeta(resolvedScannedBy, idempotencyKey),
       };
 

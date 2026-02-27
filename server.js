@@ -375,6 +375,19 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function normalizeDateAdded(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `${raw} 00:00:00`;
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) return null;
+  const d = new Date(parsed);
+  const yyyy = String(d.getUTCFullYear());
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} 00:00:00`;
+}
+
 const loginAttempts = new Map();
 function isLoginBlocked(key) {
   const rec = loginAttempts.get(key);
@@ -1365,6 +1378,7 @@ app.post("/api/pallets", requireWriteRole, (req, res) => {
     product_quantity,
     location,
     parts,
+    date_added,
     scanned_by,
   } = req.body;
 
@@ -1382,13 +1396,17 @@ app.post("/api/pallets", requireWriteRole, (req, res) => {
   const currentUnits = palletQty * unitsPerPallet;
   const audit = getAuditContext(req, scanned_by || "Unknown");
   const scannedByPerson = audit.scannedBy;
+  const normalizedDateAdded = normalizeDateAdded(date_added);
+  if (String(date_added || "").trim() && !normalizedDateAdded) {
+    return res.status(400).json({ error: "Invalid date_added format. Use YYYY-MM-DD" });
+  }
 
   checkIdempotencyDuplicate(audit.idempotencyKey, (dupErr, isDup) => {
     if (dupErr) return res.status(500).json({ error: dupErr.message });
     if (isDup) return res.json({ ok: true, deduped: true, message: "Duplicate request ignored" });
 
     db.run(
-      "INSERT INTO pallets (id, customer_name, product_id, pallet_quantity, product_quantity, current_units, location, parts, scanned_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO pallets (id, customer_name, product_id, pallet_quantity, product_quantity, current_units, location, parts, date_added, scanned_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?)",
       [
         palletId,
         customer_name,
@@ -1398,6 +1416,7 @@ app.post("/api/pallets", requireWriteRole, (req, res) => {
         currentUnits,
         location,
         partsJson,
+        normalizedDateAdded,
         scannedByPerson,
       ],
       function (err) {
@@ -1430,6 +1449,7 @@ app.post("/api/pallets", requireWriteRole, (req, res) => {
           product_quantity: unitsPerPallet,
           location,
           parts: parts || null,
+          date_added: normalizedDateAdded || nowIso(),
           message: "Pallet checked in successfully",
         });
 
@@ -1442,6 +1462,7 @@ app.post("/api/pallets", requireWriteRole, (req, res) => {
           current_units: currentUnits,
           location,
           parts,
+          date_added: normalizedDateAdded || nowIso(),
           scanned_by: scannedByPerson,
         });
       }
