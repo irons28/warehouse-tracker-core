@@ -29,7 +29,7 @@ where cloudflared >nul 2>&1
 if %errorlevel%==0 (
   if exist "%CFG%" (
     set "TUNNEL_MODE=fixed"
-    start "WT Tunnel" cmd /k "cloudflared tunnel run"
+    start "WT Tunnel" cmd /k "cloudflared tunnel --protocol http2 --edge-ip-version 4 --config ""%CFG%"" run"
   )
 )
 
