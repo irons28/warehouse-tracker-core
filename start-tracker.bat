@@ -1,6 +1,14 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0"
+set "APP_HOME=C:\Users\User\Documents\warehouse-tracker-core"
+cd /d "%APP_HOME%"
+
+if errorlevel 1 (
+  echo [WT] APP_HOME not found: %APP_HOME%
+  echo [WT] Edit start-tracker.bat and set APP_HOME to your repo folder.
+  pause
+  exit /b 1
+)
 
 if not exist "logs" mkdir "logs"
 
@@ -17,7 +25,7 @@ if not exist "node_modules" (
 )
 
 echo [WT] Starting server...
-start "WT Server" cmd /k "cd /d "%~dp0" && npm start"
+start "WT Server" cmd /k "cd /d "%APP_HOME%" && npm start"
 
 timeout /t 4 /nobreak >nul
 
@@ -34,7 +42,7 @@ if %errorlevel%==0 (
 )
 
 if not "%TUNNEL_MODE%"=="fixed" (
-  start "WT Tunnel" cmd /k "cd /d "%~dp0" && npm run tunnel:cf"
+  start "WT Tunnel" cmd /k "cd /d "%APP_HOME%" && npm run tunnel:cf"
 )
 
 echo.

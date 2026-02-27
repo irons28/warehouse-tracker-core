@@ -59,10 +59,11 @@ Windows persistence (recommended):
 ```bat
 powercfg /change standby-timeout-ac 0
 powercfg /change monitor-timeout-ac 0
-mkdir "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup" 2>nul
-copy /Y "C:\Users\User\Documents\warehouse-tracker-all4\start-tracker.bat" "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\start-tracker.bat"
 ```
-Replace the source path above with your actual repo path on Windows.
+Then add Startup shortcut (not file copy):
+- Press `Win + R` and run: `shell:startup`
+- Right-click -> `New` -> `Shortcut`
+- Target: your repo `start-tracker.bat` path
 
 ## 6) Validate
 - Desktop: `https://localhost:3443` (or `http://localhost:3000`)
