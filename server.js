@@ -689,6 +689,30 @@ function isCustomerAllowedForUser(req, customerName) {
 
 // Create tables
 db.serialize(() => {
+  // Pallets table (base schema)
+  db.run(
+    `CREATE TABLE IF NOT EXISTS pallets (
+      id TEXT PRIMARY KEY,
+      customer_name TEXT NOT NULL,
+      product_id TEXT NOT NULL,
+      pallet_quantity INTEGER DEFAULT 1,
+      product_quantity INTEGER DEFAULT 0,
+      current_units INTEGER DEFAULT 0,
+      location TEXT NOT NULL,
+      parts TEXT,
+      date_added TEXT DEFAULT (datetime('now')),
+      status TEXT DEFAULT 'active',
+      removed_date TEXT,
+      removed_by TEXT,
+      scanned_by TEXT DEFAULT 'Unknown',
+      version INTEGER NOT NULL DEFAULT 0
+    )`,
+    (err) => {
+      if (err) console.error("Error creating pallets table:", err);
+      else console.log("✓ Pallets table ready");
+    }
+  );
+
   // Check and migrate pallets table
   db.all("PRAGMA table_info(pallets)", (err, columns) => {
     if (err) {
@@ -703,6 +727,10 @@ db.serialize(() => {
       const hasCurrentUnits = columns.some((col) => col.name === "current_units");
       const hasScannedBy = columns.some((col) => col.name === "scanned_by");
       const hasVersion = columns.some((col) => col.name === "version");
+      const hasDateAdded = columns.some((col) => col.name === "date_added");
+      const hasStatus = columns.some((col) => col.name === "status");
+      const hasRemovedDate = columns.some((col) => col.name === "removed_date");
+      const hasRemovedBy = columns.some((col) => col.name === "removed_by");
 
       if (hasQuantity && !hasPalletQuantity) {
         console.log("🔄 Migrating database to new schema...");
@@ -759,6 +787,38 @@ db.serialize(() => {
         db.run("ALTER TABLE pallets ADD COLUMN version INTEGER NOT NULL DEFAULT 0", (err) => {
           if (err) console.error("Error adding version column:", err);
           else console.log("✓ version column added");
+        });
+      }
+
+      if (!hasDateAdded) {
+        console.log("🔄 Adding date_added column...");
+        db.run("ALTER TABLE pallets ADD COLUMN date_added TEXT DEFAULT (datetime('now'))", (err) => {
+          if (err) console.error("Error adding date_added column:", err);
+          else console.log("✓ date_added column added");
+        });
+      }
+
+      if (!hasStatus) {
+        console.log("🔄 Adding status column...");
+        db.run("ALTER TABLE pallets ADD COLUMN status TEXT DEFAULT 'active'", (err) => {
+          if (err) console.error("Error adding status column:", err);
+          else console.log("✓ status column added");
+        });
+      }
+
+      if (!hasRemovedDate) {
+        console.log("🔄 Adding removed_date column...");
+        db.run("ALTER TABLE pallets ADD COLUMN removed_date TEXT", (err) => {
+          if (err) console.error("Error adding removed_date column:", err);
+          else console.log("✓ removed_date column added");
+        });
+      }
+
+      if (!hasRemovedBy) {
+        console.log("🔄 Adding removed_by column...");
+        db.run("ALTER TABLE pallets ADD COLUMN removed_by TEXT", (err) => {
+          if (err) console.error("Error adding removed_by column:", err);
+          else console.log("✓ removed_by column added");
         });
       }
     }
