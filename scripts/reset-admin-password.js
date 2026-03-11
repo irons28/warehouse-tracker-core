@@ -19,6 +19,36 @@ function hashPassword(pass, salt) {
 
 const db = new sqlite3.Database(dbPath);
 
+function finishWithSessionReset(userId, successMessage) {
+  db.run(
+    `CREATE TABLE IF NOT EXISTS user_sessions (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT
+    )`,
+    (sessionsErr) => {
+      if (sessionsErr) {
+        console.error("Failed to ensure user_sessions table:", sessionsErr.message || sessionsErr);
+        process.exitCode = 1;
+        return db.close();
+      }
+
+      db.run("DELETE FROM user_sessions WHERE user_id = ?", [userId], (deleteErr) => {
+        if (deleteErr) {
+          console.error("Failed to clear admin sessions:", deleteErr.message || deleteErr);
+          process.exitCode = 1;
+        } else {
+          console.log(successMessage);
+          console.log(`Cleared existing sessions for user id ${userId}`);
+        }
+        db.close();
+      });
+    }
+  );
+}
+
 db.serialize(() => {
   db.run(
     `CREATE TABLE IF NOT EXISTS users (
@@ -60,10 +90,10 @@ db.serialize(() => {
               if (updErr) {
                 console.error("Failed to update admin user:", updErr.message || updErr);
                 process.exitCode = 1;
+                return db.close();
               } else {
-                console.log(`Admin credentials reset: ${username} / ${password}`);
+                return finishWithSessionReset(row.id, `Admin credentials reset: ${username} / ${password}`);
               }
-              db.close();
             }
           );
         } else {
@@ -71,14 +101,14 @@ db.serialize(() => {
             `INSERT INTO users (username, password_hash, password_salt, role, display_name, customer_scope, is_active, must_reset_password)
              VALUES (?, ?, ?, 'owner', 'Site Manager', '*', 1, 0)`,
             [username, hash, salt],
-            (insErr) => {
+            function (insErr) {
               if (insErr) {
                 console.error("Failed to create admin user:", insErr.message || insErr);
                 process.exitCode = 1;
+                return db.close();
               } else {
-                console.log(`Admin user created: ${username} / ${password}`);
+                return finishWithSessionReset(this.lastID, `Admin user created: ${username} / ${password}`);
               }
-              db.close();
             }
           );
         }
